@@ -3,7 +3,10 @@ module opentitan_soc_top(
   input logic rst_ni,
 
   input  logic [19:0] gpio_i,
-  output logic [19:0] gpio_o
+  output logic [19:0] gpio_o,
+
+  output              uart_tx,
+  input               uart_rx
 );
 
   wire [19:0] gpio_in;
@@ -51,20 +54,37 @@ module opentitan_soc_top(
   tlul_pkg::tl_h2d_t plic_req;
   tlul_pkg::tl_d2h_t plic_resp;
 
+  tlul_pkg::tl_h2d_t xbar_to_uart;
+  tlul_pkg::tl_d2h_t uart_to_xbar;
+
+
   // interrupt vector
   logic [32:0] intr_vector;  // size depend on number of interrupts 
                              // increses on adding peripherals 
-
-  // Interrupt source list 
+// Interrupt source list 
   logic [31:0] intr_gpio;
+  logic        intr_uart0_tx_watermark;
+  logic        intr_uart0_rx_watermark;
+  logic        intr_uart0_tx_empty;
+  logic        intr_uart0_rx_overflow;
+  logic        intr_uart0_rx_frame_err;
+  logic        intr_uart0_rx_break_err;
+  logic        intr_uart0_rx_timeout;
+  logic        intr_uart0_rx_parity_err;
+  logic        intr_req;
 
   assign intr_vector = {  
-
-      // add more pheripheral intrupts here
       intr_gpio,
+      intr_uart0_rx_parity_err,
+      intr_uart0_rx_timeout,
+      intr_uart0_rx_break_err,
+      intr_uart0_rx_frame_err,
+      intr_uart0_rx_overflow,
+      intr_uart0_tx_empty,
+      intr_uart0_rx_watermark,
+      intr_uart0_tx_watermark,
       1'b0
   };
-
   logic [31:0] gpio_intr;
   
   opentitan_tlul_wrapper
@@ -174,7 +194,11 @@ module opentitan_soc_top(
 
     // PLIC
     .tl_plic_o  (plic_req),
-    .tl_plic_i  (plic_resp)
+    .tl_plic_i  (plic_resp),
+
+   //UART
+   .tl_uart_o         (xbar_to_uart),
+   .tl_uart_i         (uart_to_xbar)
   );
 
   //GPIO module
@@ -243,5 +267,41 @@ tlul_adapter_tempsensor u_tempsense(
   .CLK_REF				   (CLK_REF),
   .CLK_LC				   (CLK_LC)
 );
+
+uart u_uart0(
+  .clk_i                   (clock             ),
+  .rst_ni                  (system_rst_ni     ),
+
+  // Bus Interface
+  .tl_i                    (xbar_to_uart      ),
+  .tl_o                    (uart_to_xbar      ),
+
+  // Generic IO
+  .cio_rx_i                (uart_rx           ),
+  .cio_tx_o                (uart_tx           ),
+  .cio_tx_en_o             (                  ),
+
+  // Interrupts
+  .intr_tx_watermark_o     (intr_uart0_tx_watermark ),
+  .intr_rx_watermark_o     (intr_uart0_rx_watermark ),
+  .intr_tx_empty_o         (intr_uart0_tx_empty     ),
+  .intr_rx_overflow_o      (intr_uart0_rx_overflow  ),
+  .intr_rx_frame_err_o     (intr_uart0_rx_frame_err ),
+  .intr_rx_break_err_o     (intr_uart0_rx_break_err ),
+  .intr_rx_timeout_o       (intr_uart0_rx_timeout   ),
+  .intr_rx_parity_err_o    (intr_uart0_rx_parity_err) 
+);
+logic [63:0] clk_count;
+always_ff @(posedge clk_i) begin
+  if(!rst_ni) begin
+    clk_count <= 0;
+  end
+  else begin  
+    clk_count <= clk_count + 1;
+    if(clk_count >= 'd10000) begin
+      $finish;
+    end
+  end
+end
 
 endmodule
